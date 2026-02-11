@@ -1,249 +1,324 @@
-'use client'
+"use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '@/lib/auth-context'
-import { useStudent, useStudentByUserId, useUpdateStudent } from '@/hooks/use-students'
+import { supabase } from '@/lib/supabase/client'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { toast } from 'sonner'
-import { Loader2, User, Mail, Phone, Calendar, Award, LogOut } from 'lucide-react'
+import { Loader2, User, Mail, Phone, Calendar, LogOut, Camera, ShieldCheck, Award } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
 export function ProfileScreen() {
   const { user, logout } = useAuth()
-const { student, isLoading, mutate } = useStudentByUserId(user?.id || null)  
-const updateStudent = useUpdateStudent()
-
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  
+  const [profile, setProfile] = useState<any>(null)
+  const [isLoading, setIsLoading] = useState(true)
   const [isEditing, setIsEditing] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  
   const [formData, setFormData] = useState({
-    name: '',
-    phone: '',
-    birthdate: '',
+    full_name: '',
+    phone_number: '',
+    birth_date: '',
+    whatsapp: '',
+    guardian_name: '',
+    belt: '',
+    degree: '',
+    avatar_url: '',
+    user_classification: '',
   })
 
   useEffect(() => {
-    if (student) {
-      setFormData({
-        name: student.name || '',
-        phone: student.phone || '',
-        birthdate: student.birthdate || '',
-      })
+    const fetchProfile = async () => {
+      if (!user?.id) return
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single()
+
+        if (error) throw error
+        
+        setProfile(data)
+        setFormData({
+          full_name: data?.full_name || '',
+          phone_number: data?.phone_number || '',
+          birth_date: data?.birth_date || '',
+          whatsapp: data?.whatsapp || '',
+          guardian_name: data?.guardian_name || '',
+          belt: data?.belt || 'Branca',
+          degree: data?.degree || '0',
+          avatar_url: data?.avatar_url || '',
+          user_classification: data?.user_classification || 'Adulto'
+        })
+      } catch (error) {
+        toast.error('Erro ao carregar perfil')
+      } finally {
+        setIsLoading(false)
+      }
     }
-  }, [student])
+    fetchProfile()
+  }, [user?.id])
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsSubmitting(true)
-
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !user?.id) return
     try {
-      await updateStudent(student.id, formData)
-      toast.success('Perfil atualizado com sucesso!')
-      mutate()
-      setIsEditing(false)
-    } catch (error: any) {
-      toast.error(error.message || 'Erro ao atualizar perfil')
+      setIsSubmitting(true)
+      const fileExt = file.name.split('.').pop()
+      const fileName = `${user.id}-${Date.now()}.${fileExt}`
+      const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, file)
+      if (uploadError) throw uploadError
+      const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(fileName)
+      await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', user.id)
+      setFormData(prev => ({ ...prev, avatar_url: publicUrl }))
+      toast.success('Foto atualizada!')
+    } catch (error) {
+      toast.error('Erro no upload')
     } finally {
       setIsSubmitting(false)
     }
   }
 
-  const handleLogout = async () => {
-    if (!confirm('Tem certeza que deseja sair?')) return
-    
-    try {
-      await logout()
-      toast.success('Logout realizado com sucesso!')
-    } catch (error) {
-      toast.error('Erro ao fazer logout')
-    }
-  }
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault()
+  setIsSubmitting(true)
+  try {
+    // Atualiza a tabela profiles. A Trigger no banco cuidará da tabela students.
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        full_name: formData.full_name,
+        whatsapp: formData.whatsapp,
+        birth_date: formData.birth_date,
+        guardian_name: formData.guardian_name,
+        user_classification: formData.user_classification,
+        phone_number: formData.phone_number // Mantenha o nome exato da coluna
+      })
+      .eq('id', user?.id)
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    )
+    if (error) throw error
+    
+    setProfile({ ...profile, ...formData })
+    toast.success('Perfil e registro de atleta sincronizados!')
+    setIsEditing(false)
+  } catch (error: any) {
+    toast.error('Erro na sincronização: ' + error.message)
+  } finally {
+    setIsSubmitting(false)
   }
+}
+
+  if (isLoading) return <div className="flex h-screen items-center justify-center bg-black"><Loader2 className="h-8 w-8 animate-spin text-red-600" /></div>
 
   return (
-    <div className="min-h-screen bg-background p-6">
-      <div className="max-w-2xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Meu Perfil</h1>
-          <p className="text-muted-foreground">
-            Gerencie suas informações pessoais
-          </p>
-        </div>
-
-        {/* Avatar */}
-        <Card className="p-6 mb-6">
-          <div className="flex items-center gap-6">
-            <Avatar className="h-24 w-24">
-              <AvatarImage src={student?.profile_image} />
-              <AvatarFallback className="text-2xl">
-                {student?.name?.charAt(0).toUpperCase() || 'U'}
+    <div className="min-h-screen bg-black text-white p-4 pb-24">
+      <div className="max-w-2xl mx-auto space-y-6">
+        
+        {/* Header Visual */}
+        <div className="relative flex flex-col items-center pt-8">
+          <div className="relative group">
+            <Avatar className="h-32 w-32 border-4 border-zinc-800 shadow-2xl">
+              <AvatarImage src={formData.avatar_url} className="object-cover" />
+              <AvatarFallback className="bg-zinc-900 text-4xl text-red-600 font-bold">
+                {formData.full_name?.charAt(0)}
               </AvatarFallback>
             </Avatar>
-            <div>
-              <h2 className="text-2xl font-bold">{student?.name}</h2>
-              <p className="text-muted-foreground">{student?.email}</p>
-              <div className="flex items-center gap-2 mt-2">
-                <div
-                  className="px-3 py-1 rounded-full text-sm font-medium"
-                  style={{ 
-                    backgroundColor: `${student?.belt?.color}33`,
-                    color: student?.belt?.color 
-                  }}
+            <button 
+              type="button"
+              onClick={() => fileInputRef.current?.click()} 
+              className="absolute bottom-0 right-0 p-2 bg-red-600 rounded-full shadow-lg hover:bg-red-700 transition-colors"
+            >
+              <Camera className="h-5 w-5 text-white" />
+            </button>
+            <input type="file" ref={fileInputRef} onChange={handleAvatarUpload} className="hidden" accept="image/*" />
+          </div>
+          <h2 className="mt-4 text-2xl font-bold tracking-tight">{formData.full_name || 'Usuário'}</h2>
+          <p className="text-zinc-500 font-medium">{profile?.email}</p>
+        </div>
+
+        {/* Info de Graduação (Bloqueado) */}
+        <div className="grid grid-cols-2 gap-4">
+          <Card className="bg-zinc-900 border-zinc-800 p-4 shadow-md">
+            <div className="flex items-center gap-2 mb-1">
+              <Award className="h-4 w-4 text-zinc-500" />
+              <p className="text-[10px] text-zinc-500 uppercase font-black tracking-widest">Faixa Atual</p>
+            </div>
+            <p className="text-lg font-bold text-red-600 tracking-tight">{formData.belt}</p>
+          </Card>
+          <Card className="bg-zinc-900 border-zinc-800 p-4 shadow-md">
+            <div className="flex items-center gap-2 mb-1">
+              <ShieldCheck className="h-4 w-4 text-zinc-500" />
+              <p className="text-[10px] text-zinc-500 uppercase font-black tracking-widest">Graduação</p>
+            </div>
+            <p className="text-lg font-bold text-red-600 tracking-tight">{formData.degree}º Grau</p>
+          </Card>
+        </div>
+
+        {/* Formulário Principal */}
+        <Card className="bg-zinc-900 border-zinc-800 p-6 shadow-xl">
+          <form onSubmit={handleSubmit} className="space-y-6">
+            
+            {/* Seletor de Perfil (Adulto/Infantil) */}
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <Label className="text-zinc-400 text-[10px] uppercase font-black tracking-widest">Perfil de Conta</Label>
+              </div>
+              <div className="flex gap-3">
+                <Button 
+                  type="button"
+                  disabled={!isEditing}
+                  onClick={() => setFormData({...formData, user_classification: 'Adulto'})}
+                  className={`flex-1 h-12 rounded-full border transition-all ${
+                    formData.user_classification === 'Adulto' 
+                    ? "bg-transparent border-red-600 text-red-600 shadow-[0_0_10px_rgba(220,38,38,0.2)]" 
+                    : "bg-transparent border-zinc-800 text-zinc-500"
+                  }`}
                 >
-                  <Award className="h-4 w-4 inline mr-1" />
-                  {student?.belt?.name || 'Sem cinto'}
-                </div>
+                  Adulto
+                </Button>
+                <Button 
+                  type="button"
+                  disabled={!isEditing}
+                  onClick={() => setFormData({...formData, user_classification: 'Infantil'})}
+                  className={`flex-1 h-12 rounded-full border transition-all ${
+                    formData.user_classification === 'Infantil' 
+                    ? "bg-transparent border-red-600 text-red-600 shadow-[0_0_10px_rgba(220,38,38,0.2)]" 
+                    : "bg-transparent border-zinc-800 text-zinc-500"
+                  }`}
+                >
+                  Infantil
+                </Button>
               </div>
             </div>
-          </div>
-        </Card>
 
-        {/* Form */}
-        <Card className="p-6 mb-6">
-          <form onSubmit={handleSubmit}>
-            <div className="space-y-4">
-              {/* Nome */}
-              <div>
-                <Label htmlFor="name">
-                  <User className="h-4 w-4 inline mr-2" />
-                  Nome Completo
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="space-y-2">
+                <Label className="text-zinc-400 text-xs uppercase font-bold flex items-center gap-2">
+                  <User className="h-3 w-3" /> Nome Completo
                 </Label>
-                <Input
-                  id="name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                <Input 
+                  value={formData.full_name} 
+                  onChange={e => setFormData({...formData, full_name: e.target.value})}
                   disabled={!isEditing}
-                  className="mt-1"
+                  className="bg-zinc-800 border-zinc-700 focus:border-red-600 h-11"
                 />
               </div>
 
-              {/* Email (read-only) */}
-              <div>
-                <Label htmlFor="email">
-                  <Mail className="h-4 w-4 inline mr-2" />
-                  Email
+              {/* Email - Bloqueado */}
+              <div className="space-y-2">
+                <Label className="text-zinc-400 text-xs uppercase font-bold flex items-center gap-2">
+                  <Mail className="h-3 w-3" /> E-mail (Não editável)
                 </Label>
-                <Input
-                  id="email"
-                  value={student?.email || ''}
-                  disabled
-                  className="mt-1"
-                />
+                <Input value={profile?.email || ''} disabled className="bg-zinc-950 border-zinc-800 text-zinc-500 h-11 cursor-not-allowed" />
               </div>
 
-              {/* Telefone */}
-              <div>
-                <Label htmlFor="phone">
-                  <Phone className="h-4 w-4 inline mr-2" />
-                  Telefone
+              <div className="space-y-2">
+                <Label className="text-zinc-400 text-xs uppercase font-bold flex items-center gap-2">
+                  <Phone className="h-3 w-3" /> WhatsApp
                 </Label>
-                <Input
-                  id="phone"
-                  type="tel"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                <Input 
+                  value={formData.whatsapp} 
+                  onChange={e => setFormData({...formData, whatsapp: e.target.value})}
                   disabled={!isEditing}
                   placeholder="(00) 00000-0000"
-                  className="mt-1"
+                  className="bg-zinc-800 border-zinc-700 h-11"
                 />
               </div>
 
-              {/* Data de Nascimento */}
-              <div>
-                <Label htmlFor="birthdate">
-                  <Calendar className="h-4 w-4 inline mr-2" />
-                  Data de Nascimento
+              <div className="space-y-2">
+                <Label className="text-zinc-400 text-xs uppercase font-bold flex items-center gap-2">
+                  <Phone className="h-3 w-3" /> Telefone Adicional
                 </Label>
-                <Input
-                  id="birthdate"
-                  type="date"
-                  value={formData.birthdate}
-                  onChange={(e) => setFormData({ ...formData, birthdate: e.target.value })}
+                <Input 
+                  value={formData.phone_number} 
+                  onChange={e => setFormData({...formData, phone_number: e.target.value})}
                   disabled={!isEditing}
-                  className="mt-1"
+                  placeholder="(00) 00000-0000"
+                  className="bg-zinc-800 border-zinc-700 h-11"
                 />
               </div>
 
-              {/* Botões */}
-              <div className="flex gap-2 pt-4">
-                {!isEditing ? (
-                  <Button type="button" onClick={() => setIsEditing(true)}>
-                    Editar Perfil
-                  </Button>
-                ) : (
-                  <>
-                    <Button type="submit" disabled={isSubmitting}>
-                      {isSubmitting ? (
-                        <>
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          Salvando...
-                        </>
-                      ) : (
-                        'Salvar Alterações'
-                      )}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => {
-                        setIsEditing(false)
-                        setFormData({
-                          name: student?.name || '',
-                          phone: student?.phone || '',
-                          birthdate: student?.birthdate || '',
-                        })
-                      }}
-                    >
-                      Cancelar
-                    </Button>
-                  </>
-                )}
+              <div className="space-y-2">
+                <Label className="text-zinc-400 text-xs uppercase font-bold flex items-center gap-2">
+                  <Calendar className="h-3 w-3" /> Nascimento
+                </Label>
+                <Input 
+                  type="date"
+                  value={formData.birth_date} 
+                  onChange={e => setFormData({...formData, birth_date: e.target.value})}
+                  disabled={!isEditing}
+                  className="bg-zinc-800 border-zinc-700 h-11"
+                />
               </div>
+
+              {/* Responsável (Condicional) */}
+              {formData.user_classification === 'Infantil' && (
+                <div className="space-y-2">
+                  <Label className="text-zinc-400 text-xs uppercase font-bold flex items-center gap-2">
+                    <ShieldCheck className="h-3 w-3" /> Nome do Responsável
+                  </Label>
+                  <Input 
+                    value={formData.guardian_name} 
+                    onChange={e => setFormData({...formData, guardian_name: e.target.value})}
+                    disabled={!isEditing}
+                    className="bg-zinc-800 border-zinc-700 h-11"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Botões de Ação Corrigidos */}
+            <div className="pt-4 flex gap-3">
+              {!isEditing ? (
+                <Button 
+                  type="button" 
+                  onClick={(e) => {
+                    e.preventDefault(); // Prevenção extra
+                    setIsEditing(true);
+                  }} 
+                  className="w-full bg-red-600 hover:bg-red-700 font-bold uppercase py-6"
+                >
+                  Editar Perfil
+                </Button>
+              ) : (
+                <>
+                  <Button type="submit" disabled={isSubmitting} className="flex-1 bg-red-600 hover:bg-red-700 font-bold uppercase py-6">
+                    {isSubmitting ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : 'Salvar Alterações'}
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => setIsEditing(false)} className="flex-1 border-zinc-700 text-zinc-400 py-6 font-bold uppercase">
+                    Cancelar
+                  </Button>
+                </>
+              )}
             </div>
           </form>
         </Card>
 
         {/* Informações da Conta */}
-        <Card className="p-6 mb-6">
-          <h3 className="font-bold mb-4">Informações da Conta</h3>
+        <Card className="bg-zinc-900/50 border-zinc-800 p-6">
+          <h3 className="text-xs font-black uppercase tracking-widest text-zinc-500 mb-4">Informações da Conta</h3>
           <div className="space-y-3 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Status</span>
-              <span className="font-medium capitalize">{student?.status || 'Ativo'}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Membro desde</span>
-              <span className="font-medium">
-                {student?.created_at
-                  ? format(new Date(student.created_at), 'dd/MM/yyyy', {
-                      locale: ptBR,
-                    })
-                  : '-'}
+            <div className="flex justify-between items-center py-2 border-b border-zinc-800/50">
+              <span className="text-zinc-500">Membro desde</span>
+              <span className="font-bold text-zinc-300">
+                {profile?.created_at ? format(new Date(profile.created_at), 'dd/MM/yyyy', { locale: ptBR }) : '-'}
               </span>
             </div>
           </div>
         </Card>
 
         {/* Logout */}
-        <Button
-          variant="destructive"
-          className="w-full"
-          onClick={handleLogout}
-        >
+        <Button variant="ghost" onClick={() => logout()} className="w-full text-zinc-600 hover:text-red-500 hover:bg-red-500/10 py-8 mb-10">
           <LogOut className="h-4 w-4 mr-2" />
-          Sair da Conta
+          Sair do Aplicativo
         </Button>
       </div>
     </div>

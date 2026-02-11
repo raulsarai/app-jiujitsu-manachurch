@@ -1,128 +1,205 @@
-'use client'
+"use client";
 
-import { useAuth } from '@/lib/auth-context'
-import { useStudent, useStudentByUserId } from '@/hooks/use-students'
-import { useCheckins } from '@/hooks/use-checkins'
-import { useClasses } from '@/hooks/use-classes'
-import { Card } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Calendar, TrendingUp, Award, Clock, Loader2 } from 'lucide-react'
-import { format } from 'date-fns'
-import { ptBR } from 'date-fns/locale'
+import { useEffect, useState, useMemo } from "react";
+import { useAuth } from "@/lib/auth-context";
+import { supabase } from "@/lib/supabase/client";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { TrendingUp, Clock, Loader2, UserIcon, Calendar } from "lucide-react";
+import Image from "next/image";
 
 export function DashboardScreen() {
-  const { user } = useAuth()
-  const { classes } = useClasses()
-  const { checkins, isLoading: checkinsLoading } = useCheckins()
-  
-  // Buscar dados do estudante pelo user_id
-  const { student, isLoading: studentLoading } = useStudentByUserId(user?.id || null)
+  const { user: authUser } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [checkins, setCheckins] = useState<any[]>([]);
+  const [classes, setClasses] = useState<any[]>([]);
 
+  useEffect(() => {
+    const loadData = async () => {
+      if (!authUser?.id) {
+        console.log("❌ Sem UUID");
+        setLoading(false);
+        return;
+      }
 
-  if (studentLoading || checkinsLoading) {
+      try {
+        console.log("🚀 Carregando para UUID:", authUser.id);
+
+        // 1. Buscar check-ins direto pelo user_id (agora é profiles.id)
+        const { data: checkinsData } = await supabase
+          .from("check_ins")
+          .select("*")
+          .eq("user_id", authUser.id.toString());
+
+        console.log("✅ Check-ins:", checkinsData?.length || 0);
+        setCheckins(checkinsData || []);
+
+        // 2. Buscar classes de hoje
+        const today = new Date();
+        const dayOfWeek = today.getDay();
+
+        const dayMappings: Record<number, string[]> = {
+          0: ["Domingo"],
+          1: ["Segunda", "Segunda-feira"],
+          2: ["Terça", "Terça-feira"],
+          3: ["Quarta", "Quarta-feira"],
+          4: ["Quinta", "Quinta-feira"],
+          5: ["Sexta", "Sexta-feira"],
+          6: ["Sábado"],
+        };
+
+        const possibleDays = dayMappings[dayOfWeek];
+
+        const { data: allClasses, error: classError } = await supabase
+          .from("classes")
+          .select("*")
+          .eq("is_active", true);
+
+        console.log("❌ Erro classes:", classError);
+        console.log("✅ Todas as aulas:", allClasses?.length);
+        console.log("📋 Classes data:", allClasses);
+        const classesFilter =
+          allClasses?.filter((cls) => {
+            if (!cls.day_of_week) return false;
+            const dayLower = cls.day_of_week.toLowerCase();
+            return possibleDays.some((day) =>
+              dayLower.includes(day.toLowerCase()),
+            );
+          }) || [];
+
+        console.log("🏫 Aulas de hoje:", classesFilter.length);
+        setClasses(classesFilter);
+      } catch (error) {
+        console.error("❌ Erro:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, [authUser?.id]);
+
+  const stats = useMemo(() => {
+    const total = checkins.filter((c) => c.status === "APPROVED").length;
+    const thisMonth = checkins.filter((c) => {
+      const date = new Date(c.created_at);
+      const now = new Date();
+      return (
+        date.getMonth() === now.getMonth() &&
+        date.getFullYear() === now.getFullYear()
+      );
+    }).length;
+    const meta = 50;
+    const progresso = total % meta;
+    return {
+      total,
+      mensal: thisMonth,
+      restantes: meta - progresso,
+      porcentagem: (progresso / meta) * 100,
+    };
+  }, [checkins]);
+
+  if (loading)
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin" />
+      <div className="flex h-screen items-center justify-center bg-black">
+        <Loader2 className="animate-spin h-8 w-8 text-red-600" />
       </div>
-    )
-  }
-
-  // Calcular estatísticas
-  const totalCheckins = checkins?.length || 0
-  const thisMonthCheckins = checkins?.filter((c: any) => {
-    const checkinDate = new Date(c.created_at)
-    const now = new Date()
-    return checkinDate.getMonth() === now.getMonth() && 
-           checkinDate.getFullYear() === now.getFullYear()
-  }).length || 0
-
-  // Próximas aulas (hoje)
-  const today = format(new Date(), 'EEEE', { locale: ptBR })
-const todayClasses = classes?.filter((c: any) => 
-  c.day_of_week?.toLowerCase().includes(today.toLowerCase()) // ✅ Corrigido
-) || []
+    );
 
   return (
-    <div className="min-h-screen bg-background p-6">
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">
-          Olá, {student?.name?.split(' ')[0] || 'Atleta'}! 👋
-        </h1>
-        <p className="text-muted-foreground">
-          Bem-vindo ao seu painel de treinamento
+    <div className="min-h-screen bg-black text-white p-4 pb-24">
+      <div className="flex items-center gap-4 mb-6 pt-4">
+        <Avatar className="h-16 w-16 border-2 border-red-600">
+          <AvatarImage src={authUser?.avatar} className="object-cover" />
+          <AvatarFallback className="bg-zinc-900 text-red-600 font-bold">
+            {authUser?.name?.charAt(0)}
+          </AvatarFallback>
+        </Avatar>
+        <div>
+          <h1 className="text-xl font-bold">{authUser?.name}</h1>
+          <p className="text-red-600 text-[11px] font-bold uppercase">
+            {authUser?.user_classification}
+          </p>
+        </div>
+      </div>
+
+      <div className="w-full mb-6 flex flex-col items-center">
+        <div className="relative w-full max-w-[720px] h-40 rounded-xl overflow-hidden shadow-2xl border border-zinc-800">
+          <Image
+            src="https://bjjfanatics.com.br/cdn/shop/articles/faixxa_1024x1024.jpg?v=1547833767"
+            alt="Faixa"
+            fill
+            className="object-cover opacity-90"
+            unoptimized
+          />
+        </div>
+        <p className="text-center text-lg font-black uppercase italic mt-3">
+          Faixa {authUser?.belt} - {authUser?.degree}º Grau
         </p>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <Card className="p-6">
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-primary/10 rounded-lg">
-              <Calendar className="h-6 w-6 text-primary" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Check-ins este mês</p>
-              <p className="text-2xl font-bold">{thisMonthCheckins}</p>
-            </div>
+      <Card className="bg-zinc-900 border-zinc-800 p-6 mb-6">
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5 text-red-600" />
+            <span className="text-xs font-black uppercase">
+              Próxima Graduação
+            </span>
           </div>
-        </Card>
+          <span className="text-[10px] text-zinc-500">
+            {stats.total} treinos
+          </span>
+        </div>
+        <p className="text-3xl font-black mb-4">{stats.restantes} aulas</p>
+        <div className="w-full bg-zinc-800 h-2 rounded-full overflow-hidden">
+          <div
+            className="bg-red-600 h-full"
+            style={{ width: `${Math.min(stats.porcentagem, 100)}%` }}
+          />
+        </div>
+      </Card>
 
-        <Card className="p-6">
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-green-500/10 rounded-lg">
-              <TrendingUp className="h-6 w-6 text-green-500" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Total de treinos</p>
-              <p className="text-2xl font-bold">{totalCheckins}</p>
-            </div>
-          </div>
+      <div className="grid grid-cols-2 gap-4 mb-8">
+        <Card className="bg-zinc-900 border-zinc-800 p-4">
+          <p className="text-[10px] text-zinc-500 uppercase font-black">
+            Este Mês
+          </p>
+          <p className="text-2xl font-bold text-red-600">{stats.mensal}</p>
         </Card>
-
-        <Card className="p-6">
-          <div className="flex items-center gap-4">
-            <div 
-              className="p-3 rounded-lg"
-              style={{ backgroundColor: `${student?.belt?.color}33` }}
-            >
-              <Award className="h-6 w-6" style={{ color: student?.belt?.color }} />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Seu cinto</p>
-              <p className="text-2xl font-bold">{student?.belt?.name || 'Não definido'}</p>
-            </div>
-          </div>
+        <Card className="bg-zinc-900 border-zinc-800 p-4">
+          <p className="text-[10px] text-zinc-500 uppercase font-black">
+            Total
+          </p>
+          <p className="text-2xl font-bold text-green-500">{stats.total}</p>
         </Card>
       </div>
 
-      {/* Aulas de Hoje */}
-      <div className="mb-8">
-        <h2 className="text-xl font-bold mb-4">Aulas de Hoje</h2>
-        {todayClasses.length === 0 ? (
-          <Card className="p-6 text-center">
-            <Clock className="h-12 w-12 mx-auto mb-2 text-muted-foreground" />
-            <p className="text-muted-foreground">Nenhuma aula programada para hoje</p>
+      <div>
+        <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
+          <Clock className="h-5 w-5 text-red-600" /> Aulas de Hoje (
+          {classes.length})
+        </h2>
+        {classes.length === 0 ? (
+          <Card className="bg-zinc-900/30 border-dashed border-zinc-800 p-8 text-center">
+            <p className="text-zinc-500">Nenhuma aula hoje</p>
           </Card>
         ) : (
-          <div className="grid gap-4">
-            {todayClasses.map((classData: any) => (
-              <Card key={classData.id} className="p-6">
-                <div className="flex justify-between items-start">
+          <div className="space-y-3">
+            {classes.map((cls) => (
+              <Card
+                key={cls.id}
+                className="bg-zinc-900 border-zinc-800 p-4 hover:border-red-600/50"
+              >
+                <div className="flex justify-between items-center">
                   <div>
-                    <h3 className="font-bold text-lg mb-1">{classData.name}</h3>
-                    <p className="text-sm text-muted-foreground mb-2">
-                      Instrutor: {classData.instructor_name}
-                    </p>
-                    <div className="flex items-center gap-2 text-sm">
-                      <Clock className="h-4 w-4" />
-                      <span>{classData.start_time}</span>
-                      <span className="text-muted-foreground">
-                        • {classData.duration_minutes} min
-                      </span>
+                    <h3 className="font-bold">{cls.name || cls.type}</h3>
+                    <div className="text-[11px] text-zinc-500 mt-1">
+                      ⏰ {cls.start_time}{" "}
+                      {cls.instructor_name && `👨‍🏫 ${cls.instructor_name}`}
                     </div>
                   </div>
-                  <Button size="sm">
+                  <Button className="bg-red-600 hover:bg-red-700 h-8 text-xs px-3">
                     Check-in
                   </Button>
                 </div>
@@ -132,48 +209,13 @@ const todayClasses = classes?.filter((c: any) =>
         )}
       </div>
 
-      {/* Últimos Check-ins */}
-      <div>
-        <h2 className="text-xl font-bold mb-4">Últimos Check-ins</h2>
-        {checkins?.length === 0 ? (
-          <Card className="p-6 text-center">
-            <Calendar className="h-12 w-12 mx-auto mb-2 text-muted-foreground" />
-            <p className="text-muted-foreground">Você ainda não fez nenhum check-in</p>
-          </Card>
-        ) : (
-          <div className="space-y-3">
-            {checkins?.slice(0, 5).map((checkin: any) => (
-              <Card key={checkin.id} className="p-4">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="font-medium">{checkin.class?.name || 'Treino livre'}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {format(new Date(checkin.created_at), "dd 'de' MMMM 'às' HH:mm", {
-                        locale: ptBR,
-                      })}
-                    </p>
-                  </div>
-                  <span
-                    className={`px-3 py-1 rounded-full text-xs font-medium ${
-                      checkin.status === 'APPROVED'
-                        ? 'bg-green-500/20 text-green-500'
-                        : checkin.status === 'REJECTED'
-                        ? 'bg-red-500/20 text-red-500'
-                        : 'bg-yellow-500/20 text-yellow-500'
-                    }`}
-                  >
-                    {checkin.status === 'APPROVED'
-                      ? 'Aprovado'
-                      : checkin.status === 'REJECTED'
-                      ? 'Rejeitado'
-                      : 'Pendente'}
-                  </span>
-                </div>
-              </Card>
-            ))}
-          </div>
-        )}
+      <div className="mt-8 p-3 bg-zinc-900/50 border border-zinc-800 rounded text-[10px] text-zinc-500">
+        <p className="font-bold text-red-500 mb-2">🔍 DEBUG</p>
+        <p>UUID: {authUser?.id}</p>
+        <p>Nome: {authUser?.name}</p>
+        <p>Check-ins: {checkins.length}</p>
+        <p>Aulas hoje: {classes.length}</p>
       </div>
     </div>
-  )
+  );
 }

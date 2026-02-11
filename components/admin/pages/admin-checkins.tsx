@@ -26,10 +26,13 @@ import { ptBR } from 'date-fns/locale'
 
 export function AdminCheckins() {
   const [statusFilter, setStatusFilter] = useState<string>('all')
-  const { checkins, isLoading, isError, mutate } = useCheckins(
-    statusFilter !== 'all' ? { status: statusFilter } : undefined
-  )
+  const { checkins, isLoading, isError, mutate } = useCheckins()
   const approveCheckin = useApproveCheckin()
+
+  // Filtrar localmente
+  const filteredCheckins = statusFilter === 'all' 
+    ? checkins 
+    : checkins?.filter((c: any) => c.status === statusFilter)
 
   const handleApprove = async (id: string) => {
     try {
@@ -96,20 +99,20 @@ export function AdminCheckins() {
             <TableRow>
               <TableHead>Data</TableHead>
               <TableHead>Hora</TableHead>
-              <TableHead>Aula</TableHead>
+              <TableHead>Usuário</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Ações</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {checkins?.length === 0 ? (
+            {filteredCheckins?.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} className="text-center py-8">
                   Nenhum check-in encontrado
                 </TableCell>
               </TableRow>
             ) : (
-              checkins?.map((checkin: any) => (
+              filteredCheckins?.map((checkin: any) => (
                 <TableRow key={checkin.id}>
                   <TableCell>
                     {format(new Date(checkin.created_at), 'dd/MM/yyyy', {
@@ -121,7 +124,7 @@ export function AdminCheckins() {
                       locale: ptBR,
                     })}
                   </TableCell>
-                  <TableCell>{checkin.class?.name || 'Sem aula'}</TableCell>
+                  <TableCell>{checkin.name || 'Sem nome'}</TableCell>
                   <TableCell>
                     <span
                       className={`px-2 py-1 rounded text-sm ${

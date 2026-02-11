@@ -1,83 +1,98 @@
-'use client'
+// hooks/use-checkins.ts - Atualizar completo
 
-import useSWR from 'swr'
+import { useEffect, useState } from 'react'
+import { supabase } from '@/lib/supabase/client'
 
-const fetcher = (url: string) => fetch(url).then((res) => {
-  if (!res.ok) throw new Error('Failed to fetch')
-  return res.json()
-})
+export function useCheckins(userId?: string | null) {
+  const [checkins, setCheckins] = useState<any[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [isError, setIsError] = useState(false)
 
-interface CheckinFilters {
-  class_id?: string
-  status?: string
-  start_date?: string
-  end_date?: string
-}
-
-export function useCheckins(filters?: CheckinFilters) {
-  const params = new URLSearchParams()
-  if (filters?.class_id) params.append('class_id', filters.class_id)
-  if (filters?.status) params.append('status', filters.status)
-  if (filters?.start_date) params.append('start_date', filters.start_date)
-  if (filters?.end_date) params.append('end_date', filters.end_date)
-
-  const url = `/api/checkins${params.toString() ? `?${params.toString()}` : ''}`
-  
-  const { data, error, isLoading, mutate } = useSWR(url, fetcher)
-
-  return {
-    checkins: data,
-    isLoading,
-    isError: error,
-    mutate,
+  const mutate = async () => {
+    await fetchCheckins()
   }
-}
 
-export function useCreateCheckin() {
-  return async (classId: string) => {
-    const response = await fetch('/api/checkins', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ class_id: classId }),
-    })
-    
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || 'Failed to create checkin')
+  const fetchCheckins = async () => {
+    try {
+      setIsLoading(true)
+      let query = supabase.from('check_ins').select('*')
+      
+      if (userId) {
+        query = query.eq('user_id', userId)
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false })
+      
+      if (error) throw error
+      setCheckins(data || [])
+      setIsError(false)
+    } catch (error) {
+      console.error('Erro ao buscar check-ins:', error)
+      setIsError(true)
+    } finally {
+      setIsLoading(false)
     }
-    
-    return response.json()
   }
+
+  useEffect(() => {
+    fetchCheckins()
+  }, [userId])
+
+  return { checkins, isLoading, isError, mutate }
 }
 
 export function useApproveCheckin() {
-  return async (id: string, status: 'APPROVED' | 'REJECTED', notes?: string) => {
-    const response = await fetch(`/api/checkins/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, notes }),
-    })
-    
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || 'Failed to update checkin')
+  const approveCheckin = async (checkinId: string, status: 'APPROVED' | 'REJECTED') => {
+    try {
+      const { error } = await supabase
+        .from('check_ins')
+        .update({ status })
+        .eq('id', checkinId)
+
+      if (error) throw error
+      return { success: true }
+    } catch (error: any) {
+      console.error('Erro ao atualizar check-in:', error)
+      throw error
     }
-    
-    return response.json()
   }
+
+  return approveCheckin
 }
 
-export function useDeleteCheckin() {
-  return async (id: string) => {
-    const response = await fetch(`/api/checkins/${id}`, {
-      method: 'DELETE',
-    })
-    
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || 'Failed to delete checkin')
+// hooks/use-checkins.ts - Adicionar ao final
+
+export function useCreateCheckin() {
+  const createCheckin = async (classId: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      
+      if (!user?.id) throw new Error('Usuário não autenticado')
+
+      const { error } = await supabase
+        .from('check_ins')
+        .insert([
+          {
+            user_id: user.id,
+            class_id: classId,
+            status: 'APPROVED',
+            created_at: new Date().toISOString(),
+          },
+        ])
+
+      if (error) {
+        if (error.message.includes('duplicate')) {
+          throw new Error('Você já fez check-in para esta aula hoje')
+        }
+        throw error
+      }
+      return { success: true }
+    } catch (error: any) {
+      console.error('Erro ao criar check-in:', error)
+      throw error
     }
-    
-    return response.json()
   }
+
+  return createCheckin
 }
+

@@ -142,7 +142,7 @@ export function AdminStudents() {
                   <TableCell>
                     <span
                       className="px-2 py-1 rounded text-sm"
-                      style={{ backgroundColor: student.belt?.color }}
+                      style={{ backgroundColor: 'gray' }}
                     >
                       {student.belt?.name || 'Não definido'}
                     </span>
