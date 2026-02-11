@@ -1,32 +1,51 @@
-import { type NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { NextResponse, type NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
-  // Renovar a sessão se ainda for válida
-  const supabase = await createClient()
+  let response = NextResponse.next({
+    request: { headers: request.headers },
+  })
 
-  const { data: { user }, error } = await supabase.auth.getUser()
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) { return request.cookies.get(name)?.value },
+        set(name: string, value: string, options: CookieOptions) {
+          request.cookies.set({ name, value, ...options })
+          response = NextResponse.next({ request: { headers: request.headers } })
+          response.cookies.set({ name, value, ...options })
+        },
+        remove(name: string, options: CookieOptions) {
+          request.cookies.set({ name, value: '', ...options })
+          response = NextResponse.next({ request: { headers: request.headers } })
+          response.cookies.set({ name, value: '', ...options })
+        },
+      },
+    }
+  )
 
-  // Se não tiver usuário, permitir acesso a auth/callback e página de login
-  if (!user && !request.nextUrl.pathname.startsWith('/auth')) {
-    return NextResponse.next()
+  const { data: { session } } = await supabase.auth.getSession()
+
+  const path = request.nextUrl.pathname
+
+  // 1. PERMITIR rotas de autenticação abertas
+  if (path.startsWith('/login') || path.startsWith('/auth/')) {
+    return response
   }
 
-  // Se tiver usuário, permitir acesso a tudo
-  if (user) {
-    return NextResponse.next()
+  // 2. REDIRECIONAR se não houver sessão
+  if (!session) {
+    return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  // Se não tiver sessão válida e não estiver em auth, redirecionar para home
-  if (!user && !request.nextUrl.pathname.startsWith('/auth')) {
-    return NextResponse.redirect(new URL('/', request.url))
-  }
-
-  return NextResponse.next()
+  return response
 }
 
+// No config do seu middleware.ts, garanta que ele ignore a pasta auth
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|public).*)',
+    '/((?!_next/static|_next/image|favicon.ico|public|auth).*)',
   ],
 }
